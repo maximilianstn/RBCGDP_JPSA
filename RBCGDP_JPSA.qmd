@@ -145,7 +145,7 @@ cat(sprintf("\nAutocorrelation (Lag 1):\nJapan: %.3f\nSouth Africa: %.3f\n",
             autocorr_jp, autocorr_sa))
 ```
 ```{r Rolling Correlation}
-window <- 15
+window <- 5
 rolling_corr <- sapply(1:(nrow(df)-window+1), function(i) {
   cor(df$cycle_japan[i:(i+window-1)], df$cycle_sa[i:(i+window-1)])
 })
@@ -163,5 +163,21 @@ ggplot(df_rolling, aes(x = x, y = correlation)) +
                      labels = time_labels[seq(1, length(x_index), by = N)]) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# EXPLAINATION: When you compute a rolling correlation with a window of size w, the first valid value can only appear after you have w data points.
+# So:
+# 	•	If your full dataset has T quarters
+# 	•	And your rolling window is w
+# 	•	Then your rolling series will only have T - w + 1 points
+# 
+# ⸻
+# 
+# 💡 Example:
+# 
+# Let’s say you have 123 quarters (from Q1:1994 to Q3:2024):
+# 	•	If window = 5, you get 123 - 5 + 1 = 119 rolling points → covers almost the full range
+# 	•	If window = 20, you get 123 - 20 + 1 = 104 rolling points → graph starts at Q2:1999
+# 
+# So the larger the window, the more data is needed before the first rolling value can be computed → meaning the graph starts later and looks “shorter”.
 ```
 
