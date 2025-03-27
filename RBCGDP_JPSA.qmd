@@ -1,0 +1,24 @@
+---
+title: "GDP and RBC Analysis of South Africa and Japan"
+author: "Maximilian Stein & Arthur Briens"
+format: html
+format: html
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  fig.width = 9,
+  fig.height = 5
+)
+library(tidyverse)
+library(readr)
+library(lubridate)
+library(zoo)
+library(mFilter)
+---
+````
