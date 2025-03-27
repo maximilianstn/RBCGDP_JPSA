@@ -15,10 +15,153 @@ knitr::opts_chunk$set(
   fig.width = 9,
   fig.height = 5
 )
+# Load libraries
 library(tidyverse)
 library(readr)
 library(lubridate)
 library(zoo)
 library(mFilter)
----
-````
+```
+
+```{r Set-Up & Load Data}
+
+# Load CSV with semicolon separator if needed
+df <- read_csv2("GDP_Data_JPSA.csv", show_col_types = FALSE) |>
+  rename(Period = 1, Japan = 2, SouthAfrica = 3)
+
+# Drop rows with NA GDP
+df <- df |> filter(!is.na(Japan) & !is.na(SouthAfrica))
+
+# Convert '1993-Q1' to Date
+df <- df |> 
+  mutate(
+    Year = as.integer(str_sub(Period, 1, 4)),
+    Qtr = as.integer(str_sub(Period, 7, 7)),
+    Month = case_when(
+      Qtr == 1 ~ 2,
+      Qtr == 2 ~ 5,
+      Qtr == 3 ~ 8,
+      Qtr == 4 ~ 11
+    ),
+    Date = as.Date(sprintf("%d-%02d-01", Year, Month))
+  ) |> arrange(Date)
+
+
+```
+
+```{r HP-Filter}
+# Log-transform GDP series
+df <- df |> 
+  mutate(
+    log_japan = log(Japan),
+    log_sa = log(SouthAfrica)
+  )
+
+# Apply HP filter (lambda = 1600 for quarterly data)
+hp_japan <- hpfilter(df$log_japan, freq = 1600)
+hp_sa <- hpfilter(df$log_sa, freq = 1600)
+
+# Add to dataframe
+df <- df |> 
+  mutate(
+    cycle_japan = hp_japan$cycle,
+    trend_japan = hp_japan$trend,
+    cycle_sa = hp_sa$cycle,
+    trend_sa = hp_sa$trend
+  )
+```
+
+```{r Time Labels}
+# Generate quarter labels
+start_year <- 1994
+end_year <- 2024
+quarters <- c("Q1", "Q2", "Q3", "Q4")
+
+time_labels <- expand.grid(Q = quarters, Y = start_year:end_year) |>
+  mutate(label = paste(Q, Y, sep = ":")) |>
+  pull(label)
+
+x_index <- 1:nrow(df)
+N <- 12  # Show every Nth label
+
+```
+
+```{r Plot 1 - Plot Merged Cycle}
+ggplot(df, aes(x = x_index)) +
+  geom_line(aes(y = cycle_japan, color = "Japan")) +
+  geom_line(aes(y = cycle_sa, color = "South Africa")) +
+  scale_color_manual(values = c("Japan" = "#D95319", "South Africa" = "#0072BD")) +
+  scale_x_continuous(breaks = x_index[seq(1, length(x_index), by = N)],
+                     labels = time_labels[seq(1, length(x_index), by = N)]) +
+  labs(title = "Business Cycle Component: Japan vs. South Africa",
+       x = "Quarter", y = "Deviation from Trend (log GDP)", color = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r Plot 2 & 3 - Seperated Country Cycles}
+# Japan
+ggplot(df, aes(x = x_index, y = cycle_japan)) +
+  geom_line(color = "#D95319", size = 1.2) +
+  labs(title = "Business Cycle: Japan", x = "Quarter", y = "Deviation from Trend") +
+  scale_x_continuous(breaks = x_index[seq(1, length(x_index), by = N)],
+                     labels = time_labels[seq(1, length(x_index), by = N)]) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# South Africa
+ggplot(df, aes(x = x_index, y = cycle_sa)) +
+  geom_line(color = "#0072BD", size = 1.2) +
+  labs(title = "Business Cycle: South Africa", x = "Quarter", y = "Deviation from Trend") +
+  scale_x_continuous(breaks = x_index[seq(1, length(x_index), by = N)],
+                     labels = time_labels[seq(1, length(x_index), by = N)]) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r Plot 4 - Trend Components}
+ggplot(df, aes(x = x_index)) +
+  geom_line(aes(y = trend_japan, color = "Japan"), linetype = "dashed") +
+  geom_line(aes(y = trend_sa, color = "South Africa"), linetype = "dashed") +
+  scale_color_manual(values = c("Japan" = "#D95319", "South Africa" = "#0072BD")) +
+  scale_x_continuous(breaks = x_index[seq(1, length(x_index), by = N)],
+                     labels = time_labels[seq(1, length(x_index), by = N)]) +
+  labs(title = "Trend Component: Japan vs. South Africa",
+       x = "Quarter", y = "Log GDP - Trend", color = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r Stilized Facts}
+vol_jp <- sd(df$cycle_japan) * 100
+vol_sa <- sd(df$cycle_sa) * 100
+cat(sprintf("Volatility (std × 100):\nJapan: %.2f\nSouth Africa: %.2f\n", vol_jp, vol_sa))
+
+corr0 <- cor(df$cycle_japan, df$cycle_sa)
+cat(sprintf("\nContemporaneous Correlation (Japan–South Africa): %.3f\n", corr0))
+
+autocorr_jp <- cor(df$cycle_japan[-1], df$cycle_japan[-nrow(df)])
+autocorr_sa <- cor(df$cycle_sa[-1], df$cycle_sa[-nrow(df)])
+cat(sprintf("\nAutocorrelation (Lag 1):\nJapan: %.3f\nSouth Africa: %.3f\n",
+            autocorr_jp, autocorr_sa))
+```
+```{r Rolling Correlation}
+window <- 15
+rolling_corr <- sapply(1:(nrow(df)-window+1), function(i) {
+  cor(df$cycle_japan[i:(i+window-1)], df$cycle_sa[i:(i+window-1)])
+})
+
+df_rolling <- tibble(
+  x = x_index[window:nrow(df)],
+  correlation = rolling_corr
+)
+
+ggplot(df_rolling, aes(x = x, y = correlation)) +
+  geom_line(color = "black", size = 1.2) +
+  labs(title = "Rolling Correlation (15-quarter window)",
+       x = "Quarter", y = "Correlation") +
+  scale_x_continuous(breaks = x_index[seq(1, length(x_index), by = N)],
+                     labels = time_labels[seq(1, length(x_index), by = N)]) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
